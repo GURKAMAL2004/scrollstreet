@@ -60,6 +60,9 @@
 </style>
 </head>
 <body>
+<a href="/" style="position:fixed;top:12px;left:14px;z-index:6;color:var(--dim);
+  text-decoration:none;font-size:13px;background:color-mix(in srgb, var(--panel) 80%, transparent);
+  border:1px solid var(--line);border-radius:999px;padding:5px 12px">&#8962; home</a>
 <div id="feed"></div>
 <div class="hint" id="hint">scroll &darr; &mdash; 25 cards, fully local</div>
 <script>
@@ -184,7 +187,9 @@ async function fillBuffer() {
   fetching = true;
   setLoader('<div class="spinner"></div>brewing card ' + (cards.length + 1) + " / " + MAX + " &hellip;");
   try {
-    const res = await fetch("/api/next?session=" + session);
+    const qs = new URLSearchParams(location.search);   // forward feed-builder filters
+    qs.set("session", session);
+    const res = await fetch("/api/next?" + qs.toString());
     const data = await res.json();
     if (data.done) { done = true; renderRecap(); return; }
     cards.push(data);

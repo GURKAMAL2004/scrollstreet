@@ -90,6 +90,69 @@ def log_event(event: dict) -> None:
         f.write(json.dumps(event, ensure_ascii=False) + "\n")
 
 
+_filters_cache: dict | None = None
+
+
+def filters_payload() -> dict:
+    """Everything the feed-builder UI needs to render its choices."""
+    global _filters_cache
+    if _filters_cache is None:
+        pool = ds.catalog()
+        pool = pool[pool["has_summary"] & ~pool["delisted"]]
+        counts = pool["asset_class"].value_counts()
+        _filters_cache = {
+            "total": int(len(pool)),
+            "model": cards.pick_model(),
+            "classes": [
+                {"name": c, "count": int(counts.get(c, 0))}
+                for c in CLASS_ORDER
+                if counts.get(c, 0) > 0
+            ],
+            "countries": pool["country"].value_counts().head(60).index.tolist(),
+            "categories": pool["category_l1"].value_counts().head(40).index.tolist(),
+        }
+    return _filters_cache
+
+
+def search_universe(query: str) -> list[dict]:
+    """Name/symbol search over everything with a story, map coords included."""
+    c = ds.catalog()
+    c = c[c["has_summary"]]
+    mask = c["name"].str.contains(query, case=False, na=False) | c[
+        "symbol"
+    ].str.upper().str.startswith(query.upper())
+    hits = c[mask].copy()
+    if hits.empty:
+        return []
+    hits["_len"] = hits["symbol"].str.len()
+    hits = hits.sort_values("_len").drop_duplicates("name").head(20)
+    try:
+        from src import manifold as mf
+
+        coords = mf.meta()[["symbol", "asset_class", "x", "y"]]
+        hits = hits.merge(coords, on=["symbol", "asset_class"], how="left")
+    except FileNotFoundError:
+        hits["x"] = None
+        hits["y"] = None
+    out = []
+    for row in hits.itertuples(index=False):
+        out.append(
+            {
+                "symbol": row.symbol,
+                "name": row.name if isinstance(row.name, str) else row.symbol,
+                "asset_class": row.asset_class,
+                "country": row.country if isinstance(row.country, str) else None,
+                "category": next(
+                    (v for v in (row.category_l3, row.category_l1) if isinstance(v, str)),
+                    None,
+                ),
+                "x": round(float(row.x), 4) if row.x == row.x and row.x is not None else None,
+                "y": round(float(row.y), 4) if row.y == row.y and row.y is not None else None,
+            }
+        )
+    return out
+
+
 class Handler(BaseHTTPRequestHandler):
     def _send_json(self, payload: dict, status: int = 200) -> None:
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -99,24 +162,44 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _send_file(self, name: str) -> None:
+        body = (ROOT / "web" / name).read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def do_GET(self):  # noqa: N802
         url = urlparse(self.path)
         if url.path == "/":
-            body = (ROOT / "web" / "index.html").read_bytes()
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
+            self._send_file("home.html")
+        elif url.path == "/feed":
+            self._send_file("index.html")
         elif url.path == "/api/next":
-            session = parse_qs(url.query).get("session", ["anon"])[0]
+            params = parse_qs(url.query)
+
+            def one(key):
+                value = params.get(key, [None])[0]
+                return value or None
+
+            session = one("session") or "anon"
+            classes = one("classes")
+            filters = {
+                "classes": classes.split(",") if classes else None,
+                "country": one("country"),
+                "l1": one("l1"),
+                "mode": one("mode") or "random",
+                "seed": one("seed"),
+                "seed_class": one("seed_class"),
+            }
             with _lock:
                 seen = _sessions.setdefault(session, set())
                 index = len(seen)
                 if index >= MAX_CARDS:
                     self._send_json({"done": True, "index": index})
                     return
-                picks = ordering.next_symbols(seen, n=1)
+                picks = ordering.next_symbols(seen, n=1, **filters)
                 if not picks:
                     self._send_json({"done": True, "index": index})
                     return
@@ -125,6 +208,7 @@ class Handler(BaseHTTPRequestHandler):
             card = cards.generate_card(symbol, asset_class)
             card["index"] = index + 1
             card["of"] = MAX_CARDS
+            strategy = f"seed:{filters['seed']}" if filters["seed"] else filters["mode"]
             log_event(
                 {
                     "type": "card_generated",
@@ -132,12 +216,18 @@ class Handler(BaseHTTPRequestHandler):
                     "index": index + 1,
                     "symbol": symbol,
                     "asset_class": asset_class,
-                    "strategy": "random_walk",
+                    "strategy": strategy,
+                    "filters": {k: v for k, v in filters.items() if v and k != "mode"},
                     "model": card["model"],
                     "gen_ms": card["gen_ms"],
                 }
             )
             self._send_json(card)
+        elif url.path == "/api/search":
+            query = parse_qs(url.query).get("q", [""])[0].strip()
+            self._send_json(search_universe(query) if len(query) >= 2 else [])
+        elif url.path == "/api/filters":
+            self._send_json(filters_payload())
         elif url.path == "/map":
             body = (ROOT / "web" / "map.html").read_bytes()
             self.send_response(200)

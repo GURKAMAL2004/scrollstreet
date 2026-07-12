@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ScrollStreet</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  :root { --bg: #0b0d10; --panel: #14181d; --panel2: #1a2027; --line: #242b33;
+    --ink: #e8edf2; --ink2: #c3c2b7; --muted: #898781; --blue: #3987e5;
+    --equities: #3987e5; --indices: #199e70; --funds: #c98500; --etfs: #9085e9;
+    --cryptos: #008300; --currencies: #e66767; --moneymarkets: #d55181; }
+  html, body { min-height: 100%; background: var(--bg); color: var(--ink);
+    font-family: "Segoe UI", system-ui, sans-serif; }
+  .wrap { max-width: 680px; margin: 0 auto; padding: 40px 20px 60px;
+    display: flex; flex-direction: column; gap: 22px; }
+  header h1 { font-size: 34px; letter-spacing: -0.02em; }
+  header h1 span { color: var(--blue); }
+  header p { color: var(--muted); font-size: 14px; margin-top: 4px; }
+  .panel { background: var(--panel); border: 1px solid var(--line);
+    border-radius: 16px; padding: 20px; }
+  /* search */
+  #q { width: 100%; background: var(--panel2); color: var(--ink); font-size: 16px;
+    border: 1px solid var(--line); border-radius: 12px; padding: 13px 16px; outline: none; }
+  #q:focus { border-color: var(--blue); }
+  #results { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+  .hit { display: flex; align-items: center; gap: 10px; padding: 10px 12px;
+    background: var(--panel2); border: 1px solid var(--line); border-radius: 10px;
+    font-size: 13.5px; flex-wrap: wrap; }
+  .hit .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+  .hit .nm { font-weight: 600; }
+  .hit .meta { color: var(--muted); font-size: 12px; }
+  .hit .act { margin-left: auto; display: flex; gap: 6px; }
+  .hit button, .go { background: #10151a; color: var(--ink2); border: 1px solid var(--line);
+    border-radius: 8px; padding: 5px 10px; font-size: 12px; cursor: pointer; }
+  .hit button:hover, .go:hover { border-color: var(--blue); color: var(--ink); }
+  /* nav tiles */
+  .tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .tile { display: block; text-decoration: none; color: var(--ink);
+    background: var(--panel); border: 1px solid var(--line); border-radius: 16px;
+    padding: 20px; transition: border-color .15s; }
+  .tile:hover { border-color: var(--blue); }
+  .tile .big { font-size: 26px; }
+  .tile .t { font-weight: 600; margin-top: 8px; }
+  .tile .d { color: var(--muted); font-size: 12.5px; margin-top: 3px; line-height: 1.45; }
+  /* builder */
+  .panel h2 { font-size: 15px; margin-bottom: 4px; }
+  .panel .sub { color: var(--muted); font-size: 12.5px; margin-bottom: 12px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 12px; }
+  .chip { padding: 6px 12px; border-radius: 999px; border: 1px solid var(--line);
+    background: var(--panel2); color: var(--ink2); font-size: 13px; cursor: pointer;
+    user-select: none; display: flex; align-items: center; gap: 7px; }
+  .chip .dot { width: 8px; height: 8px; border-radius: 50%; }
+  .chip.on { border-color: var(--accent, var(--blue)); color: var(--ink);
+    background: color-mix(in srgb, var(--accent, var(--blue)) 12%, var(--panel2)); }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+  select { background: var(--panel2); color: var(--ink); border: 1px solid var(--line);
+    border-radius: 10px; padding: 9px 12px; font-size: 13.5px; flex: 1; min-width: 150px; }
+  .modes { display: flex; gap: 8px; margin-bottom: 16px; }
+  .mode { flex: 1; text-align: center; padding: 10px; border-radius: 10px;
+    border: 1px solid var(--line); background: var(--panel2); color: var(--ink2);
+    font-size: 13px; cursor: pointer; user-select: none; }
+  .mode.on { border-color: var(--blue); color: var(--ink);
+    background: color-mix(in srgb, var(--blue) 12%, var(--panel2)); }
+  .mode small { display: block; color: var(--muted); font-size: 11px; margin-top: 2px; }
+  #start { width: 100%; background: var(--blue); color: #fff; border: none;
+    border-radius: 12px; padding: 14px; font-size: 15.5px; font-weight: 600;
+    cursor: pointer; }
+  #start:hover { filter: brightness(1.1); }
+  footer { color: var(--muted); font-size: 12px; text-align: center; }
+  footer a { color: var(--ink2); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Scroll<span>Street</span></h1>
+    <p>the financial universe, on your machine · <span id="stat">…</span></p>
+  </header>
+
+  <div class="panel">
+    <input id="q" placeholder="&#128269;  search 225,889 instruments — try 'tesla', 'gold', 'iceland'&hellip;" autocomplete="off">
+    <div id="results"></div>
+  </div>
+
+  <div class="tiles">
+    <a class="tile" href="/feed">
+      <div class="big">&#127920;</div>
+      <div class="t">Surprise me</div>
+      <div class="d">25 cards, pure random walk across the whole universe</div>
+    </a>
+    <a class="tile" href="/map">
+      <div class="big">&#128506;&#65039;</div>
+      <div class="t">The Map</div>
+      <div class="d">all 225k instruments arranged by meaning — pan, zoom, explore</div>
+    </a>
+  </div>
+
+  <div class="panel">
+    <h2>Build my feed</h2>
+    <div class="sub">choose what the next 25 cards are made of</div>
+    <div class="chips" id="classes"></div>
+    <div class="row">
+      <select id="country"><option value="">any country</option></select>
+      <select id="l1"><option value="">any category</option></select>
+    </div>
+    <div class="modes">
+      <div class="mode on" data-mode="random">&#127922; Shuffle<small>uniform random</small></div>
+      <div class="mode" data-mode="lonely">&#129704; Lonely outposts<small>the map's remote corners</small></div>
+    </div>
+    <button id="start">Start my feed &rarr;</button>
+  </div>
+
+  <footer>fully local · zero cloud · <a href="https://github.com/GURKAMAL2004/scrollstreet">github</a></footer>
+</div>
+<script>
+"use strict";
+const COLORS = { equities:"var(--equities)", indices:"var(--indices)", funds:"var(--funds)",
+  etfs:"var(--etfs)", cryptos:"var(--cryptos)", currencies:"var(--currencies)",
+  moneymarkets:"var(--moneymarkets)" };
+const picked = new Set();
+let mode = "random";
+
+fetch("/api/filters").then(r => r.json()).then(f => {
+  document.getElementById("stat").textContent =
+    f.total.toLocaleString() + " instruments ready · model: " + (f.model || "none");
+  const box = document.getElementById("classes");
+  f.classes.forEach(c => {
+    const chip = document.createElement("span");
+    chip.className = "chip";
+    chip.style.setProperty("--accent", COLORS[c.name]);
+    const dot = document.createElement("span");
+    dot.className = "dot"; dot.style.background = COLORS[c.name];
+    chip.append(dot, document.createTextNode(`${c.name} ${c.count.toLocaleString()}`));
+    chip.onclick = () => { picked.has(c.name) ? picked.delete(c.name) : picked.add(c.name);
+      chip.classList.toggle("on", picked.has(c.name)); };
+    box.appendChild(chip);
+  });
+  const cs = document.getElementById("country");
+  f.countries.forEach(c => cs.append(new Option(c, c)));
+  const l1 = document.getElementById("l1");
+  f.categories.forEach(c => l1.append(new Option(c, c)));
+});
+
+document.querySelectorAll(".mode").forEach(m => m.onclick = () => {
+  document.querySelectorAll(".mode").forEach(x => x.classList.remove("on"));
+  m.classList.add("on"); mode = m.dataset.mode;
+});
+
+document.getElementById("start").onclick = () => {
+  const qs = new URLSearchParams();
+  if (picked.size) qs.set("classes", [...picked].join(","));
+  const country = document.getElementById("country").value;
+  const l1 = document.getElementById("l1").value;
+  if (country) qs.set("country", country);
+  if (l1) qs.set("l1", l1);
+  if (mode !== "random") qs.set("mode", mode);
+  location.href = "/feed" + (qs.toString() ? "?" + qs.toString() : "");
+};
+
+// --- search ---
+const q = document.getElementById("q"), results = document.getElementById("results");
+let timer = null;
+q.addEventListener("input", () => {
+  clearTimeout(timer);
+  timer = setTimeout(async () => {
+    const text = q.value.trim();
+    results.replaceChildren();
+    if (text.length < 2) return;
+    const hits = await (await fetch("/api/search?q=" + encodeURIComponent(text))).json();
+    hits.forEach(h => {
+      const row = document.createElement("div");
+      row.className = "hit";
+      const dot = document.createElement("span");
+      dot.className = "dot"; dot.style.background = COLORS[h.asset_class] || "#888";
+      const nm = document.createElement("span"); nm.className = "nm";
+      nm.textContent = h.name || h.symbol;
+      const meta = document.createElement("span"); meta.className = "meta";
+      meta.textContent = [h.symbol, h.asset_class, h.country, h.category].filter(Boolean).join(" · ");
+      const act = document.createElement("span"); act.className = "act";
+      const feedBtn = document.createElement("button");
+      feedBtn.textContent = "▶ feed from here";
+      feedBtn.onclick = () => location.href =
+        `/feed?seed=${encodeURIComponent(h.symbol)}&seed_class=${h.asset_class}`;
+      act.appendChild(feedBtn);
+      if (h.x !== null && h.x !== undefined) {
+        const mapBtn = document.createElement("button");
+        mapBtn.textContent = "◉ on the map";
+        mapBtn.onclick = () => location.href = `/map?x=${h.x}&y=${h.y}&k=5200`;
+        act.appendChild(mapBtn);
+      }
+      row.append(dot, nm, meta, act);
+      results.appendChild(row);
+    });
+  }, 250);
+});
+</script>
+</body>
+</html>

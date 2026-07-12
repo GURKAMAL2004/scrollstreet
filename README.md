@@ -147,6 +147,25 @@ ollama pull nomic-embed-text                 # embeddings for the map
 Want better prose? Any Ollama chat model works:
 `$env:FEED_MODEL = "qwen2.5:14b-instruct-q4_K_M"` before starting the server.
 
+## Use it like a desktop app
+
+<p align="center"><img src="assets/home.png" width="560" alt="The ScrollStreet home menu: search, surprise-me, the map, and the feed builder"></p>
+
+The home menu gives you the whole thing in one place: **search** any of the
+225k instruments (jump to it on the map, or start a feed from its semantic
+neighbourhood), **Surprise me** for a pure random walk, **The Map**, and a
+**feed builder** — pick asset classes, a country, a category, and either
+Shuffle or *Lonely outposts* mode (density-weighted toward the map's remotest
+corners). Seeded feeds ride the embedding manifold: start from Tesla and the
+next cards are its actual semantic neighbours, cross-listings skipped.
+
+On Windows, install a desktop shortcut (custom icon, silent launcher that
+boots Ollama + the server and opens a chromeless app window):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\create_desktop_shortcut.ps1
+```
+
 ## Philosophy
 
 Most "AI × finance" projects chase alpha — predicting returns, beating the market.
