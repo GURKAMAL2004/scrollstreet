@@ -1,0 +1,7 @@
+# Installed in .venv (Python 3.14). Top-level deps only; the rest are transitive.
+financedatabase==2.4.0   # pulls in pandas, financetoolkit, yfinance, scikit-learn
+pyarrow                  # parquet engine for the fast local data layer
+
+# Future (feed phase — see readme_claude/03_ROADMAP_TO_FEED.md):
+# ollama                 # local LLM card generation
+# fastapi + uvicorn      # minimal feed UI

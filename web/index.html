@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>finance feed</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  :root {
+    --bg: #0b0d10; --panel: #14181d; --panel2: #1a2027; --text: #e8edf2;
+    --dim: #8b98a5; --line: #242b33;
+    --equities: #4f8cff; --etfs: #2dd4a7; --funds: #b78cff; --indices: #ffb64f;
+    --currencies: #4fd2ff; --cryptos: #ff7a9e; --moneymarkets: #9aa7b8;
+  }
+  html, body { height: 100%; background: var(--bg); color: var(--text);
+    font-family: "Segoe UI", system-ui, sans-serif; }
+  #feed { height: 100dvh; overflow-y: scroll; scroll-snap-type: y mandatory;
+    scrollbar-width: none; overflow-anchor: none; }
+  #feed::-webkit-scrollbar { display: none; }
+  section { min-height: 100dvh; scroll-snap-align: start; scroll-snap-stop: always;
+    display: flex; align-items: center; justify-content: center; padding: 18px; }
+  .card { width: 100%; max-width: 580px; background: var(--panel);
+    border: 1px solid var(--line); border-top: 3px solid var(--accent, var(--dim));
+    border-radius: 18px; padding: 26px 26px 20px; display: flex; flex-direction: column;
+    gap: 14px; max-height: 94dvh; overflow-y: auto; scrollbar-width: thin; }
+  .top { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--dim); }
+  .chip { padding: 3px 10px; border-radius: 999px; background: var(--panel2);
+    border: 1px solid var(--line); white-space: nowrap; }
+  .chip.class { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+  .top .count { margin-left: auto; font-variant-numeric: tabular-nums; }
+  .emoji { font-size: 26px; line-height: 1; }
+  h1 { font-size: 27px; line-height: 1.2; letter-spacing: -0.02em; }
+  .hook { color: var(--accent); font-style: italic; font-size: 15.5px; line-height: 1.45; }
+  .story { font-size: 15px; line-height: 1.65; color: #cdd6de; }
+  .wild { background: var(--panel2); border: 1px solid var(--line); border-radius: 12px;
+    padding: 12px 14px; font-size: 14px; line-height: 1.5; }
+  .wild b { color: var(--accent); font-weight: 600; }
+  .oq { color: var(--dim); font-style: italic; font-size: 14px; }
+  .stats { display: flex; flex-wrap: wrap; gap: 7px; }
+  .stat { font-size: 11.5px; color: var(--dim); background: var(--panel2);
+    border: 1px solid var(--line); border-radius: 8px; padding: 5px 9px; }
+  .stat b { color: var(--text); font-weight: 600; }
+  .foot { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center;
+    border-top: 1px solid var(--line); padding-top: 12px; font-size: 12px; color: var(--dim); }
+  .foot .sym { font-weight: 700; color: var(--text); letter-spacing: 0.04em; }
+  .loader { text-align: center; color: var(--dim); }
+  .spinner { width: 34px; height: 34px; margin: 0 auto 16px; border-radius: 50%;
+    border: 3px solid var(--line); border-top-color: var(--equities);
+    animation: spin 0.9s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .hint { position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%);
+    font-size: 12px; color: var(--dim); opacity: 0.8; pointer-events: none;
+    transition: opacity 1s; }
+  button { background: var(--panel2); color: var(--text); border: 1px solid var(--line);
+    border-radius: 10px; padding: 10px 22px; font-size: 14px; cursor: pointer; }
+  .recap h1 { margin-bottom: 6px; }
+  .recap .row { display: flex; justify-content: space-between; font-size: 14px;
+    color: var(--dim); padding: 8px 0; border-bottom: 1px solid var(--line); }
+  .recap .row b { color: var(--text); }
+</style>
+</head>
+<body>
+<div id="feed"></div>
+<div class="hint" id="hint">scroll &darr; &mdash; 25 cards, fully local</div>
+<script>
+const MAX = 25, LOOKAHEAD = 3;
+const session = (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2));
+const feed = document.getElementById("feed");
+const cards = [];           // received card payloads
+const dwell = {};           // index -> total ms
+let viewing = 0, fetching = false, done = false, enteredAt = null, enteredIdx = null;
+
+const CLASS_COLORS = { equities:"var(--equities)", etfs:"var(--etfs)", funds:"var(--funds)",
+  indices:"var(--indices)", currencies:"var(--currencies)", cryptos:"var(--cryptos)",
+  moneymarkets:"var(--moneymarkets)" };
+
+function el(tag, cls, text) {
+  const node = document.createElement(tag);
+  if (cls) node.className = cls;
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+function sendEvent(payload) {
+  const body = JSON.stringify(Object.assign({session, client_ts: Date.now()}, payload));
+  navigator.sendBeacon ? navigator.sendBeacon("/api/event", new Blob([body], {type:"application/json"}))
+                       : fetch("/api/event", {method:"POST", body, keepalive:true});
+}
+
+const loaderSection = el("section");
+const loaderBox = el("div", "loader");
+loaderSection.appendChild(loaderBox);
+feed.appendChild(loaderSection);
+function setLoader(html) { loaderBox.innerHTML = html; }
+setLoader('<div class="spinner"></div>brewing card 1 / ' + MAX + ' &hellip;');
+
+function renderCard(data) {
+  const section = el("section");
+  const card = el("div", "card");
+  card.style.setProperty("--accent", CLASS_COLORS[data.asset_class] || "var(--dim)");
+
+  const top = el("div", "top");
+  top.appendChild(el("span", "emoji", (data.card.emoji || "\u{1F4CA}")));
+  top.appendChild(el("span", "chip class", data.asset_class));
+  if (data.card.vibe) top.appendChild(el("span", "chip", data.card.vibe));
+  if (data.delisted) top.appendChild(el("span", "chip", "\u{1FAA6} delisted"));
+  top.appendChild(el("span", "count", data.index + " / " + data.of));
+  card.appendChild(top);
+
+  card.appendChild(el("h1", null, data.card.headline || data.name || data.symbol));
+  if (data.card.hook) card.appendChild(el("div", "hook", data.card.hook));
+  if (data.card.story) card.appendChild(el("div", "story", data.card.story));
+  if (data.card.wild_fact) {
+    const wild = el("div", "wild");
+    const label = el("b", null, "\u{1F92F} wild fact  ");
+    wild.appendChild(label);
+    wild.appendChild(document.createTextNode(data.card.wild_fact));
+    card.appendChild(wild);
+  }
+  if (data.card.open_question) card.appendChild(el("div", "oq", "… " + data.card.open_question));
+
+  const stats = el("div", "stats");
+  Object.entries(data.stats || {}).slice(1, 7).forEach(([key, value]) => {
+    const chip = el("span", "stat");
+    chip.appendChild(document.createTextNode(key.length > 42 ? key.slice(0, 41) + "…" : key));
+    chip.appendChild(el("b", null, "  " + value));
+    stats.appendChild(chip);
+  });
+  card.appendChild(stats);
+
+  const foot = el("div", "foot");
+  foot.appendChild(el("span", "sym", data.symbol));
+  [data.name, data.market || data.exchange, data.country, data.market_cap,
+   (data.categories || [])[2] || (data.categories || [])[0]]
+    .filter(Boolean).forEach(text => foot.appendChild(el("span", null, text)));
+  foot.appendChild(el("span", null, data.model + " · " + (data.gen_ms/1000).toFixed(1) + "s"));
+  card.appendChild(foot);
+
+  section.appendChild(card);
+  section.dataset.index = data.index - 1;
+  feed.insertBefore(section, loaderSection);
+  observer.observe(section);
+  // scroll-snap re-snaps to the loader when content is inserted above it;
+  // when the first card lands, force the view back to the top of the feed
+  if (data.index === 1) requestAnimationFrame(() => { feed.scrollTop = 0; section.scrollIntoView({block: "start"}); });
+}
+
+function renderRecap() {
+  const totalMs = Object.values(dwell).reduce((a, b) => a + b, 0);
+  const classes = {};
+  cards.forEach(c => classes[c.asset_class] = (classes[c.asset_class] || 0) + 1);
+  let best = null;
+  Object.entries(dwell).forEach(([i, ms]) => { if (!best || ms > best[1]) best = [i, ms]; });
+
+  const card = el("div", "card recap");
+  card.style.setProperty("--accent", "var(--equities)");
+  card.appendChild(el("h1", null, "\u{1F3C1} That's your 25."));
+  card.appendChild(el("div", "hook", "Session over — the algorithm resets on refresh."));
+  const rows = [
+    ["cards seen", cards.length],
+    ["time in feed", (totalMs/1000/60).toFixed(1) + " min"],
+    ["asset classes", Object.entries(classes).map(([k,v]) => k + " ×" + v).join(", ")],
+    ["longest stare", best && cards[best[0]] ? cards[best[0]].name + " (" + (best[1]/1000).toFixed(0) + "s)" : "—"],
+  ];
+  rows.forEach(([k, v]) => {
+    const row = el("div", "row");
+    row.appendChild(el("span", null, k));
+    row.appendChild(el("b", null, String(v)));
+    card.appendChild(row);
+  });
+  const again = el("button", null, "run it again");
+  again.style.marginTop = "16px";
+  again.onclick = () => location.reload();
+  card.appendChild(again);
+
+  loaderBox.replaceChildren(card);
+  sendEvent({type: "session_end", cards_seen: cards.length, total_dwell_ms: totalMs});
+}
+
+async function fillBuffer() {
+  if (fetching || done) return;
+  if (cards.length >= MAX) return;
+  if (cards.length > viewing + LOOKAHEAD) return;
+  fetching = true;
+  setLoader('<div class="spinner"></div>brewing card ' + (cards.length + 1) + " / " + MAX + " &hellip;");
+  try {
+    const res = await fetch("/api/next?session=" + session);
+    const data = await res.json();
+    if (data.done) { done = true; renderRecap(); return; }
+    cards.push(data);
+    renderCard(data);
+    if (cards.length >= MAX) { done = true; renderRecap(); return; }
+  } catch (err) {
+    const retry = el("button", null, "server hiccup — retry");
+    retry.onclick = () => { loaderBox.replaceChildren(); fillBuffer(); };
+    setLoader("");
+    loaderBox.appendChild(retry);
+    fetching = false;
+    return;
+  }
+  fetching = false;
+  fillBuffer();
+}
+
+const observer = new IntersectionObserver(entries => {
+  entries.forEach(entry => {
+    const idx = Number(entry.target.dataset.index);
+    if (entry.isIntersecting) {
+      if (enteredIdx !== null && enteredIdx !== idx) flushDwell();
+      enteredIdx = idx; enteredAt = performance.now();
+      viewing = idx;
+      document.getElementById("hint").style.opacity = idx > 0 ? "0" : "0.8";
+      fillBuffer();
+    } else if (enteredIdx === idx) {
+      flushDwell();
+    }
+  });
+}, {threshold: 0.6});
+
+function flushDwell() {
+  if (enteredIdx === null || enteredAt === null) return;
+  const ms = Math.round(performance.now() - enteredAt);
+  dwell[enteredIdx] = (dwell[enteredIdx] || 0) + ms;
+  const data = cards[enteredIdx];
+  if (data) sendEvent({type: "dwell", index: enteredIdx + 1, symbol: data.symbol,
+    asset_class: data.asset_class, dwell_ms: ms});
+  enteredIdx = null; enteredAt = null;
+}
+window.addEventListener("beforeunload", flushDwell);
+
+fillBuffer();
+</script>
+</body>
+</html>

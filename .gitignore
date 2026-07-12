@@ -1,0 +1,19 @@
+# environment
+.venv/
+__pycache__/
+*.pyc
+
+# data is downloaded & generated locally - see README quickstart
+data/raw/
+data/parquet/
+data/meta/
+data/embeddings/
+data/embeddings.parquet
+data/map_meta.parquet
+data/catalog.parquet
+
+# your personal attention log stays yours
+data/feed/
+
+# leftovers
+New Text Document.py.txt

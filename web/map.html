@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>the map — financial universe</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  :root {
+    --surface: #0b0d10; --panel: #14181d; --line: #242b33;
+    --ink: #e8edf2; --ink2: #c3c2b7; --muted: #898781;
+  }
+  html, body { height: 100%; background: var(--surface); color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif; overflow: hidden; }
+  #wrap { position: relative; width: 100vw; height: 100vh; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; cursor: crosshair; }
+  #hud { position: absolute; top: 14px; left: 16px; right: 16px; display: flex;
+    align-items: flex-start; gap: 16px; pointer-events: none; }
+  #hud h1 { font-size: 15px; font-weight: 600; letter-spacing: 0.01em; }
+  #hud .sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  #legend { margin-left: auto; display: flex; flex-wrap: wrap; gap: 6px;
+    pointer-events: auto; justify-content: flex-end; max-width: 60vw; }
+  .key { display: flex; align-items: center; gap: 6px; font-size: 12px;
+    color: var(--ink2); background: color-mix(in srgb, var(--panel) 82%, transparent);
+    border: 1px solid var(--line); border-radius: 999px; padding: 4px 10px;
+    cursor: pointer; user-select: none; }
+  .key .dot { width: 9px; height: 9px; border-radius: 50%; }
+  .key.off { opacity: 0.35; }
+  #tip { position: absolute; display: none; background: var(--panel);
+    border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px;
+    font-size: 12.5px; max-width: 300px; pointer-events: none; z-index: 5;
+    box-shadow: 0 6px 24px rgba(0,0,0,0.5); }
+  #tip .n { font-weight: 600; margin-bottom: 2px; }
+  #tip .d { color: var(--muted); margin-top: 2px; }
+  #status { position: absolute; inset: 0; display: flex; flex-direction: column;
+    gap: 10px; align-items: center; justify-content: center; color: var(--muted);
+    font-size: 14px; text-align: center; padding: 20px; }
+  #foot { position: absolute; bottom: 12px; left: 16px; font-size: 11.5px;
+    color: var(--muted); pointer-events: none; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="cv"></canvas>
+  <div id="hud">
+    <div>
+      <h1>The Map</h1>
+      <div class="sub" id="sub">every financial instrument with a story, arranged by meaning</div>
+    </div>
+    <div id="legend"></div>
+  </div>
+  <div id="tip"></div>
+  <div id="foot">drag to pan · scroll to zoom · hover a dot · click a legend chip to toggle a class</div>
+  <div id="status"><div>loading the map&hellip;</div></div>
+</div>
+<script>
+"use strict";
+const cv = document.getElementById("cv"), tip = document.getElementById("tip");
+const statusEl = document.getElementById("status");
+const ctx = cv.getContext("2d");
+let D = null;                       // payload
+let visible = null;                 // per-class toggle
+let view = {x: 0, y: 0, k: 1};      // pan/zoom (data->screen: sx = (x - view.x) * view.k)
+let grid = null, gridStep = 0;      // spatial index for hover (data space)
+let raf = 0;
+let userMoved = false;              // once the user pans/zooms, stop auto-fitting
+let fitW = 0, fitH = 0;             // canvas size the view was last fitted to
+
+function resize() {
+  const dpr = window.devicePixelRatio || 1;
+  const W = Math.round(cv.clientWidth * dpr), H = Math.round(cv.clientHeight * dpr);
+  if (cv.width !== W || cv.height !== H) {   // setting .width clears the canvas - only on real change
+    cv.width = W; cv.height = H;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  scheduleDraw();
+}
+window.addEventListener("resize", resize);
+
+function fitView() {
+  const w = cv.clientWidth, h = cv.clientHeight;
+  fitW = w; fitH = h;
+  const pad = 40;
+  const kx = (w - pad * 2) / (D.bounds.xmax - D.bounds.xmin);
+  const ky = (h - pad * 2) / (D.bounds.ymax - D.bounds.ymin);
+  view.k = Math.min(kx, ky);
+  view.x = D.bounds.xmin - (w / view.k - (D.bounds.xmax - D.bounds.xmin)) / 2;
+  view.y = D.bounds.ymin - (h / view.k - (D.bounds.ymax - D.bounds.ymin)) / 2;
+}
+
+function draw() {
+  raf = 0;
+  const w = cv.clientWidth, h = cv.clientHeight;
+  // self-heal: until the user takes the wheel, refit whenever layout size changed
+  if (!userMoved && (w !== fitW || h !== fitH)) fitView();
+  ctx.clearRect(0, 0, w, h);
+  const {x: xs, y: ys, c: cs} = D.points;
+  const n = xs.length;
+  const r = Math.max(1.1, Math.min(2.4, 0.9 * Math.sqrt(view.k)));
+  const size = r * 2;
+  ctx.globalAlpha = 0.55;
+  // one pass per class: single fillStyle per pass keeps 225k rects fast
+  for (let cls = 0; cls < D.classes.length; cls++) {
+    if (!visible[cls]) continue;
+    ctx.fillStyle = D.colors[cls];
+    for (let i = 0; i < n; i++) {
+      if (cs[i] !== cls) continue;
+      const sx = (xs[i] - view.x) * view.k, sy = (ys[i] - view.y) * view.k;
+      if (sx < -4 || sy < -4 || sx > w + 4 || sy > h + 4) continue;
+      ctx.fillRect(sx - r, sy - r, size, size);
+    }
+  }
+  ctx.globalAlpha = 1;
+  // neighbourhood labels in secondary ink with a surface halo (the CVD relief)
+  ctx.font = "11.5px system-ui, sans-serif";
+  ctx.textAlign = "center";
+  for (const label of D.labels) {
+    const sx = (label.x - view.x) * view.k, sy = (label.y - view.y) * view.k;
+    if (sx < 0 || sy < 0 || sx > w || sy > h) continue;
+    ctx.lineWidth = 3; ctx.strokeStyle = "rgba(11,13,16,0.85)";
+    ctx.strokeText(label.text, sx, sy);
+    ctx.fillStyle = "#c3c2b7";
+    ctx.fillText(label.text, sx, sy);
+  }
+}
+function scheduleDraw() { if (!raf && D) raf = requestAnimationFrame(draw); }
+
+function buildGrid() {
+  gridStep = (D.bounds.xmax - D.bounds.xmin) / 160;
+  grid = new Map();
+  const {x: xs, y: ys} = D.points;
+  for (let i = 0; i < xs.length; i++) {
+    const key = Math.floor(xs[i] / gridStep) + ":" + Math.floor(ys[i] / gridStep);
+    let bucket = grid.get(key);
+    if (!bucket) grid.set(key, bucket = []);
+    bucket.push(i);
+  }
+}
+
+function nearest(dataX, dataY, maxScreenPx) {
+  const cellX = Math.floor(dataX / gridStep), cellY = Math.floor(dataY / gridStep);
+  const maxData = maxScreenPx / view.k;
+  let best = -1, bestDist = maxData * maxData;
+  for (let gx = cellX - 1; gx <= cellX + 1; gx++)
+    for (let gy = cellY - 1; gy <= cellY + 1; gy++) {
+      const bucket = grid.get(gx + ":" + gy);
+      if (!bucket) continue;
+      for (const i of bucket) {
+        if (!visible[D.points.c[i]]) continue;
+        const dx = D.points.x[i] - dataX, dy = D.points.y[i] - dataY;
+        const dist = dx * dx + dy * dy;
+        if (dist < bestDist) { bestDist = dist; best = i; }
+      }
+    }
+  return best;
+}
+
+// --- interactions -----------------------------------------------------------
+let dragging = false, lastPos = null, moved = 0;
+cv.addEventListener("pointerdown", e => { dragging = true; moved = 0; lastPos = [e.clientX, e.clientY]; });
+window.addEventListener("pointerup", () => dragging = false);
+cv.addEventListener("pointermove", e => {
+  if (dragging) {
+    userMoved = true;
+    view.x -= (e.clientX - lastPos[0]) / view.k;
+    view.y -= (e.clientY - lastPos[1]) / view.k;
+    moved += Math.abs(e.clientX - lastPos[0]) + Math.abs(e.clientY - lastPos[1]);
+    lastPos = [e.clientX, e.clientY];
+    tip.style.display = "none";
+    scheduleDraw();
+    return;
+  }
+  if (!D) return;
+  const rect = cv.getBoundingClientRect();
+  const dataX = (e.clientX - rect.left) / view.k + view.x;
+  const dataY = (e.clientY - rect.top) / view.k + view.y;
+  const i = nearest(dataX, dataY, 10);   // 10px hit target > mark size
+  if (i < 0) { tip.style.display = "none"; return; }
+  const cls = D.classes[D.points.c[i]];
+  tip.innerHTML = "";
+  const nameEl = document.createElement("div"); nameEl.className = "n";
+  nameEl.textContent = D.points.name[i] || D.points.sym[i];
+  const symEl = document.createElement("div");
+  symEl.innerHTML = `<span style="color:${D.colors[D.points.c[i]]}">&#9679;</span> ${D.points.sym[i]} · ${cls}`;
+  const hoodEl = document.createElement("div"); hoodEl.className = "d";
+  hoodEl.textContent = "neighbourhood: " + (D.hoods[D.points.h[i]] || "?");
+  tip.append(nameEl, symEl, hoodEl);
+  tip.style.display = "block";
+  const tx = Math.min(e.clientX + 14, window.innerWidth - 310);
+  const ty = Math.min(e.clientY + 14, window.innerHeight - 90);
+  tip.style.left = tx + "px"; tip.style.top = ty + "px";
+});
+cv.addEventListener("wheel", e => {
+  e.preventDefault();
+  userMoved = true;
+  const rect = cv.getBoundingClientRect();
+  const mouseX = e.clientX - rect.left, mouseY = e.clientY - rect.top;
+  const dataX = mouseX / view.k + view.x, dataY = mouseY / view.k + view.y;
+  view.k *= e.deltaY < 0 ? 1.18 : 1 / 1.18;
+  view.k = Math.max(0.05, Math.min(500, view.k));
+  view.x = dataX - mouseX / view.k;
+  view.y = dataY - mouseY / view.k;
+  tip.style.display = "none";
+  scheduleDraw();
+}, {passive: false});
+
+function buildLegend() {
+  const legend = document.getElementById("legend");
+  D.classes.forEach((cls, i) => {
+    const chip = document.createElement("span");
+    chip.className = "key";
+    const dot = document.createElement("span");
+    dot.className = "dot"; dot.style.background = D.colors[i];
+    chip.appendChild(dot);
+    chip.appendChild(document.createTextNode(`${cls} ${D.counts[i].toLocaleString()}`));
+    chip.onclick = () => { visible[i] = !visible[i]; chip.classList.toggle("off", !visible[i]); scheduleDraw(); };
+    legend.appendChild(chip);
+  });
+}
+
+fetch("/api/map").then(r => {
+  if (!r.ok) throw new Error("map not built yet");
+  return r.json();
+}).then(data => {
+  D = data;
+  visible = D.classes.map(() => true);
+  statusEl.remove();
+  document.getElementById("sub").textContent =
+    D.points.x.length.toLocaleString() + " instruments, arranged by meaning — neighbours mean similar stories";
+  resize(); fitView(); buildGrid(); buildLegend(); scheduleDraw();
+  new ResizeObserver(() => { resize(); }).observe(cv);
+  setTimeout(scheduleDraw, 300); setTimeout(scheduleDraw, 1200);
+}).catch(err => {
+  statusEl.innerHTML = "<div>the map isn't built yet</div><div style='font-size:12px'>run: .venv\\Scripts\\python.exe scripts\\build_map.py</div>";
+});
+resize();
+</script>
+</body>
+</html>
