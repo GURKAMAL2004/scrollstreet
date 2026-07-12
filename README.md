@@ -2,6 +2,8 @@
 
 **The financial universe as an infinite scroll — fully local.**
 
+![MIT license](https://img.shields.io/badge/license-MIT-3987e5) ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-c98500) ![100% local](https://img.shields.io/badge/cloud-0%25-199e70) ![Powered by Ollama](https://img.shields.io/badge/LLM-Ollama%2C%20on%20your%20GPU-9085e9) ![353k instruments](https://img.shields.io/badge/universe-353%2C822%20instruments-e66767)
+
 TikTok taught machines to learn what you can't look away from. ScrollStreet points
 that machinery at something worth being addicted to: the weird, vast landscape of
 353,000+ financial instruments — and runs the whole thing on your own computer.
@@ -50,6 +52,68 @@ server.py        ── stdlib HTTP server on 127.0.0.1, zero dependencies
 
 Everything heavy is paid once at build time; at scroll time the only expensive
 thing in the loop is the LLM — by design.
+
+## Receipts
+
+Claims are cheap. Here's the actual output.
+
+**The map learned what a car company is.** Nobody told it — the layout is pure
+description embeddings. Query Tesla's nearest non-Tesla neighbours:
+
+```
+ symbol                           name  similarity                                  neighbourhood
+FMC1.DE             Ford Motor Company       0.823  equities · Automobiles & Components · United States
+   ELCR     Electric Car Company, Inc.       0.804  equities · Automobiles & Components · United States
+GMCO34.SA       General Motors Company       0.804  equities · Automobiles & Components · United States
+ TATB.F            Tata Motors Limited       0.801  equities · Automobiles & Components · India
+VOWB.MU                  Volkswagen AG       0.796  equities · Capital Goods · Germany
+```
+
+**Every number on a card is computed, never generated.** This is what the LLM
+receives for TSLA — and the only numbers it is allowed to use:
+
+```json
+{
+  "peers in same industry ('Automobiles')": 678,
+  "'Automobiles' companies in United States": 154,
+  "exchange listings worldwide (same name)": 12,
+  "tickers in 'Automobiles & Components' now delisted (%)": 5.9,
+  "industry peers that are also Mega Cap (%)": 3.1,
+  "niche rarity score (0=everywhere, 100=one of a kind)": 46
+}
+```
+
+Why so strict? During development the 1.5B model took `57,853` (the total
+number of funds in the database) and confidently wrote *"$57,853 in assets
+under management."* The contract now spells out that MATH numbers are counts
+and percentages — never money. Small models take creative liberties with
+*prose* (that's their charm); they don't get to take them with *numbers*.
+
+**It's fast on a laptop.** Measured, not estimated:
+
+| Operation | Time |
+|---|---|
+| Load the full 353,822-symbol catalog | 0.08 s |
+| Load 161k equities incl. full text summaries | 0.13 s (was 6.4 s before Parquet conversion) |
+| Fetch one card's data + compute all its statistics | < 20 ms |
+| LLM writes a story card (qwen2.5 1.5B) | ~3 s, hidden by the lookahead buffer |
+| Embed all 225,889 descriptions (one-time map build) | ~50 min on a consumer GPU |
+
+## Gallery
+
+Zoom into the map and structure appears at every scale — countries, sectors,
+and asset classes were never drawn, they *emerged* from description embeddings:
+
+![The equities continent up close — Banks, Materials Canada/Australia, Capital Goods Germany resolve as regions](assets/map-equities-continent.png)
+
+The borderlands, where the fund territories meet the equities continent:
+
+![The border between funds (orange) and equities (blue)](assets/map-borderlands.png)
+
+And the kind of thing the random walk drags home — an obscure Spanish
+bond SICAV nobody's heard of, with its census statistics as chips:
+
+<p align="center"><img src="assets/feed-obscure-fund.png" width="480" alt="A story card about an obscure Spanish investment fund"></p>
 
 ## Quickstart
 

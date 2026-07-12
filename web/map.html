@@ -227,7 +227,16 @@ fetch("/api/map").then(r => {
   statusEl.remove();
   document.getElementById("sub").textContent =
     D.points.x.length.toLocaleString() + " instruments, arranged by meaning — neighbours mean similar stories";
-  resize(); fitView(); buildGrid(); buildLegend(); scheduleDraw();
+  resize(); fitView(); buildGrid(); buildLegend();
+  // deep-link a view: /map?x=0.1&y=-0.05&k=4000 centers there at that zoom
+  const q = new URLSearchParams(location.search);
+  if (q.has("x") && q.has("y") && q.has("k")) {
+    userMoved = true;
+    view.k = parseFloat(q.get("k"));
+    view.x = parseFloat(q.get("x")) - cv.clientWidth / (2 * view.k);
+    view.y = parseFloat(q.get("y")) - cv.clientHeight / (2 * view.k);
+  }
+  scheduleDraw();
   new ResizeObserver(() => { resize(); }).observe(cv);
   setTimeout(scheduleDraw, 300); setTimeout(scheduleDraw, 1200);
 }).catch(err => {
