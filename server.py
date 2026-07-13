@@ -273,6 +273,17 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
+    # Windows lets multiple processes bind the same port (SO_REUSEADDR quirk),
+    # so orphaned servers stack up silently - refuse to start a second copy
+    import urllib.request
+
+    try:
+        urllib.request.urlopen("http://127.0.0.1:8765/api/health", timeout=2)
+        print("ScrollStreet already running at http://127.0.0.1:8765 - exiting")
+        return
+    except OSError:
+        pass
+
     ds.catalog()  # warm the pool before first request
     server = ThreadingHTTPServer(("127.0.0.1", 8765), Handler)
     print(f"feed running -> http://127.0.0.1:8765  (model: {cards.pick_model()})")
